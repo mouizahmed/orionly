@@ -88,6 +88,7 @@ setupProtocolHandler()
 // This is critical for protocol handling (orion:// URLs)
 const gotTheLock = app.requestSingleInstanceLock()
 let isQuitting = false
+let isReadyForActivation = false
 
 if (!gotTheLock) {
   // Another instance is already running, quit this one
@@ -205,6 +206,11 @@ if (!gotTheLock) {
         app.quit()
       },
     })
+
+    // macOS can emit `activate` while the saved session is still being
+    // restored. The auth callbacks above have already revealed the correct
+    // initial window, so dock activation is safe to handle from this point on.
+    isReadyForActivation = true
   })
 }
 
@@ -222,6 +228,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('activate', () => {
+  if (!isReadyForActivation) return
   // A hidden window still counts as an open BrowserWindow, so checking for
   // zero windows would leave the dock icon unable to reveal a window after
   // the user clicks its native X. Both helpers reuse an existing hidden

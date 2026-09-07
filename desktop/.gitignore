@@ -13,6 +13,11 @@ dist-electron
 dist-ssr
 release
 *.local
+dist-ts
+*.tsbuildinfo
+/vite.config.js
+/vite.config.d.ts
+/vite.config.ts.timestamp-*.mjs
 
 # Editor directories and files
 .vscode/*

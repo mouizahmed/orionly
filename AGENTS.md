@@ -5,34 +5,39 @@
 
 ## Local development processes
 
-The local application stack has four long-running processes. Run each in its named detached `screen` session and write output to its named log:
+On macOS/Linux, the four-process local stack is managed by Overmind using `Procfile.dev`; `.overmind.env` selects that Procfile, disables unwanted `PORT` injection, and runs the supervisor as a daemon. Per-process output remains available at these stable paths:
 
-| Process | Screen session | Log |
+| Process | Overmind name | Log |
 | --- | --- | --- |
-| Go backend | `orion-backend` | `/tmp/orion-backend.log` |
-| Next.js web app | `orion-web` | `/tmp/orion-web.log` |
-| Stripe CLI webhook listener | `orion-stripe` | `/tmp/orion-stripe.log` |
-| Electron/Vite desktop app | `orion-desktop` | `/tmp/orion-desktop.log` |
+| Go backend | `backend` | `/tmp/orion-backend.log` |
+| Next.js web app | `web` | `/tmp/orion-web.log` |
+| Stripe CLI webhook listener | `stripe` | `/tmp/orion-stripe.log` |
+| Electron/Vite desktop app | `desktop` | `/tmp/orion-desktop.log` |
 
-When the user asks to restart the desktop app or local development stack, ensure all four processes are running. Restart them in backend, web, Stripe, desktop order with these commands:
+When the user asks to start or restart the local development stack, run from the repository root:
 
 ```sh
-screen -S orion-backend -X quit 2>/dev/null || true
-screen -S orion-web -X quit 2>/dev/null || true
-screen -S orion-stripe -X quit 2>/dev/null || true
-screen -S orion-desktop -X quit 2>/dev/null || true
-pkill -TERM -f '/Users/admin/Git/orion/desktop/node_modules/.bin/vite' 2>/dev/null || true
-pkill -TERM -f '/Users/admin/Git/orion/desktop/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron .' 2>/dev/null || true
-screen -dmS orion-backend bash -lc 'cd /Users/admin/Git/orion/backend && exec env API_HOST=127.0.0.1 go run ./cmd/api/main.go > /tmp/orion-backend.log 2>&1'
-screen -dmS orion-web bash -lc 'cd /Users/admin/Git/orion/web && exec npm run dev > /tmp/orion-web.log 2>&1'
-screen -dmS orion-stripe bash -lc 'cd /Users/admin/Git/orion && exec stripe listen --skip-update --forward-to http://127.0.0.1:8080/webhooks/stripe --events customer.subscription.created,customer.subscription.updated,customer.subscription.deleted,customer.subscription.paused,customer.subscription.resumed > /tmp/orion-stripe.log 2>&1'
-screen -dmS orion-desktop bash -lc 'cd /Users/admin/Git/orion/desktop && exec npm run dev > /tmp/orion-desktop.log 2>&1'
+overmind quit 2>/dev/null || true
+overmind start
 ```
 
-Then verify startup without using UI inspection:
+The process wrappers gate startup in backend, web, Stripe, desktop order and time out with a clear error when an upstream service never becomes ready.
+
+When only one service needs a restart, keep the rest of the stack alive:
 
 ```sh
-screen -ls
+overmind restart backend
+overmind restart web
+overmind restart stripe
+overmind restart desktop
+```
+
+The desktop process wrapper terminates only Orion's exact stale Vite/Electron processes before launch so Electron's single-instance lock cannot make the replacement exit immediately. If Overmind is not already running when the user asks to restart the desktop app, use `overmind start` so all four required processes are launched.
+
+Verify startup without UI inspection:
+
+```sh
+overmind status
 ps -axo pid,ppid,state,command | rg 'orion/(backend|web)|stripe listen' | rg -v 'rg '
 ps -axo pid,ppid,state,command | rg '/Users/admin/Git/orion/desktop/(node_modules/.bin/vite|node_modules/electron)' | rg -v 'rg '
 tail -80 /tmp/orion-backend.log
@@ -41,4 +46,4 @@ tail -80 /tmp/orion-stripe.log
 tail -80 /tmp/orion-desktop.log
 ```
 
-If a stale Electron main process survives after Vite exits, terminate that exact Orion desktop process before launching the session again; Electron's single-instance lock can otherwise cause the new session to exit immediately.
+Use `overmind echo` for combined live output, `overmind connect <name>` for an interactive process pane, and `overmind quit` for a graceful full-stack shutdown.

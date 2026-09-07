@@ -1,0 +1,4 @@
+backend: scripts/run-overmind-process backend
+web: scripts/run-overmind-process web
+stripe: scripts/run-overmind-process stripe
+desktop: scripts/run-overmind-process desktop

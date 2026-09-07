@@ -19,5 +19,6 @@ database_schema.sql
 
 .claude/
 .runtime-logs/
+.overmind.sock
 
 /desktop/native/audio-engine/target/

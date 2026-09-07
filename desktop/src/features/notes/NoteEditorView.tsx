@@ -388,6 +388,7 @@ export default function NoteEditorView({
             disabled={!selectedId}
             className="h-8 min-w-0 flex-1 truncate bg-transparent text-xs font-medium text-neutral-900 outline-none placeholder:text-neutral-400 dark:text-neutral-50 dark:placeholder:text-neutral-500"
           />
+          {noteViewSwitch}
           <div ref={folderPickerRef} className="relative" style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}>
             <Button
               type="button"
@@ -531,26 +532,19 @@ export default function NoteEditorView({
               onChange={handleNoteChange}
               placeholder="Markdown notes…"
               theme="auto"
-              showToolbar
               className="h-full dashboard-editor"
               noteId={selectedId}
-              toolbarLeading={noteViewSwitch}
               bottomOverlayInset={88}
             />
               </TabsContent>
 
               <TabsContent value="summary" className="h-full min-h-0">
-                <div className="flex h-full min-h-0 flex-col">
-                  <div className="flex min-h-[47px] shrink-0 items-start border-b border-neutral-200/80 bg-white p-[7px_8px] dark:border-white/10 dark:bg-[#171417]">
-                    {noteViewSwitch}
-                  </div>
-                  <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
-                    <div className="max-w-xs">
-                      <p className="text-xs font-medium text-neutral-700 dark:text-neutral-300">No summary yet</p>
-                      <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-                        A summary generated from the transcript will appear here.
-                      </p>
-                    </div>
+                <div className="flex h-full min-h-0 items-center justify-center px-6 text-center">
+                  <div className="max-w-xs">
+                    <p className="text-xs font-medium text-neutral-700 dark:text-neutral-300">No summary yet</p>
+                    <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                      A summary generated from the transcript will appear here.
+                    </p>
                   </div>
                 </div>
               </TabsContent>

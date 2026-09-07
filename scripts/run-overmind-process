@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "usage: $0 <backend|web|stripe|desktop>" >&2
+  exit 64
+fi
+
+process_name=$1
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+log_path="/tmp/orion-${process_name}.log"
+
+wait_for_url() {
+  local service_name=$1
+  local url=$2
+  local attempts=0
+
+  until curl --fail --silent --show-error --max-time 2 "$url" >/dev/null 2>&1; do
+    attempts=$((attempts + 1))
+    if [[ $attempts -ge 240 ]]; then
+      echo "timed out waiting for $service_name at $url" >&2
+      exit 1
+    fi
+    sleep 0.5
+  done
+}
+
+wait_for_stripe_listener() {
+  local attempts=0
+
+  until pgrep -f '[s]tripe listen --skip-update --forward-to http://127.0.0.1:8080/webhooks/stripe' >/dev/null; do
+    attempts=$((attempts + 1))
+    if [[ $attempts -ge 240 ]]; then
+      echo "timed out waiting for the Stripe listener to start" >&2
+      exit 1
+    fi
+    sleep 0.5
+  done
+}
+
+matching_process_ids() {
+  local command_fragment=$1
+  local normalized_fragment
+  normalized_fragment=$(printf '%s' "$command_fragment" | tr '[:upper:]' '[:lower:]')
+
+  ps -axo pid=,command= | tr '[:upper:]' '[:lower:]' | while read -r pid command; do
+    case "$command" in
+      *"$normalized_fragment"*) printf '%s\n' "$pid" ;;
+    esac
+  done
+}
+
+stop_desktop_process() {
+  local command_fragment=$1
+  local process_label=$2
+  local pids
+  local remaining_pids
+  local attempts=0
+
+  pids=$(matching_process_ids "$command_fragment")
+  [[ -z "$pids" ]] && return
+
+  for pid in $pids; do
+    kill -TERM "$pid" 2>/dev/null || true
+  done
+
+  remaining_pids=$(matching_process_ids "$command_fragment")
+  while [[ -n "$remaining_pids" && $attempts -lt 50 ]]; do
+    attempts=$((attempts + 1))
+    sleep 0.1
+    remaining_pids=$(matching_process_ids "$command_fragment")
+  done
+
+  if [[ -n "$remaining_pids" ]]; then
+    echo "$process_label did not stop after 5 seconds; forcing termination" >&2
+    for pid in $remaining_pids; do
+      kill -KILL "$pid" 2>/dev/null || true
+    done
+
+    attempts=0
+    remaining_pids=$(matching_process_ids "$command_fragment")
+    while [[ -n "$remaining_pids" && $attempts -lt 20 ]]; do
+      attempts=$((attempts + 1))
+      sleep 0.1
+      remaining_pids=$(matching_process_ids "$command_fragment")
+    done
+    if [[ -n "$remaining_pids" ]]; then
+      echo "$process_label is still running; refusing to start another desktop instance" >&2
+      exit 1
+    fi
+  fi
+}
+
+# Keep Overmind's combined output useful while retaining the stable per-process
+# log paths used by local diagnostics and project guidance.
+exec > >(tee -a "$log_path") 2>&1
+
+case "$process_name" in
+  backend)
+    cd "$repo_root/backend"
+    exec env API_HOST=127.0.0.1 go run ./cmd/api/main.go
+    ;;
+  web)
+    wait_for_url "backend" "http://127.0.0.1:8080/api/health"
+    cd "$repo_root/web"
+    exec npm run dev
+    ;;
+  stripe)
+    wait_for_url "web app" "http://127.0.0.1:3000"
+    cd "$repo_root"
+    exec stripe listen \
+      --skip-update \
+      --forward-to http://127.0.0.1:8080/webhooks/stripe \
+      --events customer.subscription.created \
+      --events customer.subscription.updated \
+      --events customer.subscription.deleted \
+      --events customer.subscription.paused \
+      --events customer.subscription.resumed
+    ;;
+  desktop)
+    wait_for_stripe_listener
+    # Vite can exit before its Electron child releases the single-instance
+    # lock. Match case-insensitively because macOS accepts differently-cased
+    # paths for the same checkout while process command lines preserve them.
+    # Only terminate Orion's exact desktop processes before relaunching.
+    stop_desktop_process "$repo_root/desktop/node_modules/.bin/vite" "Orion Vite process"
+    stop_desktop_process "$repo_root/desktop/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ." "Orion Electron process"
+    cd "$repo_root/desktop"
+    exec npm run dev
+    ;;
+  *)
+    echo "unknown process: $process_name" >&2
+    exit 64
+    ;;
+esac

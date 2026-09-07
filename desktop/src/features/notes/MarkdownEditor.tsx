@@ -1,5 +1,4 @@
 import {
-  Fragment,
   forwardRef,
   memo,
   useCallback,
@@ -12,17 +11,12 @@ import {
   type CSSProperties,
   type ForwardedRef,
   type MouseEvent as ReactMouseEvent,
-  type ReactNode,
 } from 'react'
 import { Camera, Loader2 } from 'lucide-react'
 import EditorContextMenu, { type EditorCommand } from '@/features/notes/EditorContextMenu'
 import {
   MDXEditor,
-  activePlugins$,
-  allowedHeadingLevels$,
   createRootEditorSubscription$,
-  convertSelectionToNode$,
-  currentBlockType$,
   headingsPlugin,
   listsPlugin,
   quotePlugin,
@@ -33,46 +27,22 @@ import {
   thematicBreakPlugin,
   tablePlugin,
   imagePlugin,
-  toolbarPlugin,
-  UndoRedo,
-  BoldItalicUnderlineToggles,
-  CodeToggle,
-  StrikeThroughSupSubToggles,
-  ListsToggle,
-  CreateLink,
-  InsertTable,
-  InsertThematicBreak,
-  Separator,
-  type BlockType,
-  type HEADING_LEVEL,
   type MDXEditorMethods,
   type ToMarkdownOptions,
 } from '@mdxeditor/editor'
 import { addImportVisitor$, type MdastImportVisitor } from '@mdxeditor/editor'
-import { useCellValue, usePublisher } from '@mdxeditor/gurx'
-import { $createHeadingNode, $createQuoteNode, type HeadingTagType } from '@lexical/rich-text'
 import { $createLineBreakNode, $createParagraphNode, type ElementNode } from 'lexical'
 import type * as Mdast from 'mdast'
 import '@mdxeditor/editor/style.css'
 import { resolveNoteImagePreview, uploadNoteImage } from '@/features/notes/api/notes-client'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectSeparator,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 
 type MarkdownEditorProps = {
   markdown: string
   onChange: (value: string) => void
   placeholder?: string
   theme?: 'dark' | 'auto'
-  showToolbar?: boolean
   className?: string
   noteId?: string
-  toolbarLeading?: ReactNode
   bottomOverlayInset?: number
 }
 
@@ -80,93 +50,6 @@ export type MarkdownEditorHandle = {
   focus: () => void
   blur: () => void
   isFocused: () => boolean
-}
-
-type ToolbarContentsProps = { leading?: ReactNode }
-
-type BlockTypeOption = {
-  label: string
-  value: BlockType
-}
-
-function DashboardBlockTypeSelect() {
-  const convertSelectionToNode = usePublisher(convertSelectionToNode$)
-  const currentBlockType = useCellValue(currentBlockType$)
-  const activePlugins = useCellValue(activePlugins$)
-  const allowedHeadingLevels = useCellValue(allowedHeadingLevels$)
-
-  const hasQuote = activePlugins.includes('quote')
-  const hasHeadings = activePlugins.includes('headings')
-  if (!hasQuote && !hasHeadings) return null
-
-  const options: BlockTypeOption[] = [{ label: 'Paragraph', value: 'paragraph' }]
-  if (hasQuote) options.push({ label: 'Quote', value: 'quote' })
-  if (hasHeadings) {
-    options.push(...allowedHeadingLevels.map((level: HEADING_LEVEL) => ({
-      label: `Heading ${level}`,
-      value: `h${level}` as BlockType,
-    })))
-  }
-
-  const handleChange = (blockType: string) => {
-    switch (blockType as BlockType) {
-      case 'quote':
-        convertSelectionToNode(() => $createQuoteNode())
-        break
-      case 'paragraph':
-      case '':
-        convertSelectionToNode(() => $createParagraphNode())
-        break
-      default:
-        convertSelectionToNode(() => $createHeadingNode(blockType as HeadingTagType))
-    }
-  }
-
-  return (
-    <Select value={currentBlockType || 'paragraph'} onValueChange={handleChange}>
-      <SelectTrigger
-        className="dashboard-block-type-trigger"
-        title="Select block type"
-        style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}
-      >
-        <SelectValue placeholder="Block type" />
-      </SelectTrigger>
-      <SelectContent align="start" width="md">
-        {options.map((option, index) => (
-          <Fragment key={option.value}>
-            {index === 2 ? <SelectSeparator /> : null}
-            <SelectItem value={option.value} checkPosition="left">{option.label}</SelectItem>
-          </Fragment>
-        ))}
-      </SelectContent>
-    </Select>
-  )
-}
-
-function ToolbarContents({ leading }: ToolbarContentsProps) {
-  return (
-    <div className="dashboard-toolbar-layout">
-      {leading ? <div className="dashboard-toolbar-leading">{leading}</div> : null}
-      <div className="dashboard-toolbar-controls">
-        <UndoRedo />
-        <Separator />
-        <BoldItalicUnderlineToggles />
-        <CodeToggle />
-        <Separator />
-        <StrikeThroughSupSubToggles />
-        <Separator className="dashboard-toolbar-responsive-break" />
-        <ListsToggle />
-        <Separator />
-        <DashboardBlockTypeSelect />
-        <Separator />
-        <div role="group" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-          <CreateLink />
-          <InsertTable />
-          <InsertThematicBreak />
-        </div>
-      </div>
-    </div>
-  )
 }
 
 const preserveEmptyParagraph: NonNullable<NonNullable<ToMarkdownOptions['handlers']>['paragraph']> = (
@@ -298,10 +181,8 @@ function MarkdownEditorInner(
     onChange,
     placeholder,
     theme = 'auto',
-    showToolbar = false,
     className,
     noteId,
-    toolbarLeading,
     bottomOverlayInset = 0,
   }: MarkdownEditorProps,
   ref: ForwardedRef<MarkdownEditorHandle>,
@@ -363,17 +244,8 @@ function MarkdownEditorInner(
         getInset: () => bottomOverlayInsetRef.current,
       }),
     ]
-    if (showToolbar) {
-      base.push(
-        toolbarPlugin({
-          toolbarContents: () => (
-            <ToolbarContents leading={toolbarLeading} />
-          ),
-        }),
-      )
-    }
     return base
-  }, [showToolbar, toolbarLeading])
+  }, [])
 
   const handleImageFiles = useCallback(async (files: File[]) => {
     const currentNoteId = noteIdRef.current
