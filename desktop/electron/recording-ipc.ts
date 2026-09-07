@@ -203,6 +203,30 @@ function revealOverlayWindow(overlay: BrowserWindow) {
   return overlay.isVisible()
 }
 
+async function hideDashboardAfterOverlayPaint(overlay: BrowserWindow) {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    // Wait on the visible renderer, not the hidden surface's layout effect.
+    // The next frame can paint before the following frame acknowledges it.
+    await Promise.race([
+      overlay.webContents.executeJavaScript(`new Promise(resolve => {
+        requestAnimationFrame(() => requestAnimationFrame(resolve))
+      })`),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('Overlay paint timed out')), 5_000)
+      }),
+    ])
+    if (isRendererAuthenticated() && !overlay.isDestroyed() && overlay.isVisible()) {
+      getDashboardWindow()?.hide()
+    }
+  } catch (error) {
+    // Keep the dashboard available if the overlay cannot draw or was closed.
+    console.warn('Keeping dashboard visible after overlay reveal:', error)
+  } finally {
+    if (timeout) clearTimeout(timeout)
+  }
+}
+
 export function resetRecordingUiSnapshot({ clearDraft = true }: { clearDraft?: boolean } = {}) {
   publishRecordingUiSnapshot(EMPTY_RECORDING_UI_SNAPSHOT)
   if (clearDraft) publishRecordingNoteDraft(null)
@@ -446,7 +470,7 @@ export function setupRecordingIpc() {
         resetRecordingUiSnapshot()
         throw new Error('Could not show the recording overlay')
       }
-      getDashboardWindow()?.hide()
+      await hideDashboardAfterOverlayPaint(overlay)
     } finally {
       recordingStartPending = false
     }
@@ -470,7 +494,7 @@ export function setupRecordingIpc() {
     await flushOutgoingDashboardDraft()
     if (overlay.isDestroyed()) throw new Error('Recording overlay is unavailable')
     if (!revealOverlayWindow(overlay)) throw new Error('Could not show the recording overlay')
-    getDashboardWindow()?.hide()
+    await hideDashboardAfterOverlayPaint(overlay)
   })
 
   ipcMain.handle('recording:stop', async (event) => {

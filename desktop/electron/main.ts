@@ -14,6 +14,7 @@ import {
   closeAuthWindow,
   closeDashboardWindow,
   createAuthWindow,
+  createWindow,
   destroyOverlayWindow,
   isAuthRendererSender,
   isAppNavigationUrl,
@@ -175,6 +176,9 @@ if (!gotTheLock) {
       onSignedIn: () => {
         closeAuthWindow()
         refreshTrayMenu()
+        // Warm the hidden overlay after authentication so starting a recording
+        // does not have to cold-load a second renderer before swapping windows.
+        createWindow({ show: false })
         revealDashboardWindow(getPendingRecordingNoteId())
       },
       onSignedOut: () => {
@@ -193,8 +197,8 @@ if (!gotTheLock) {
       },
     })
 
-    // Create the logged-out auth window first. The recording overlay is
-    // created lazily only after an authenticated recording start command.
+    // Keep the auth renderer available while signed out. The recording overlay
+    // is preloaded by onSignedIn only after the session has been validated.
     createAuthWindow({ show: false })
 
     // Keep the system tray/status item available while signed out so the user

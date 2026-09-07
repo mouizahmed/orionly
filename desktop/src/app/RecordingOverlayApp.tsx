@@ -51,10 +51,22 @@ function RecordingSurfaceReadyPublisher({ rootRef }: { rootRef: RefObject<HTMLDi
     const root = rootRef.current
     if (!root || !sessionId) return
     const bounds = root.getBoundingClientRect()
-    // IPC messages from one renderer are ordered: main applies these bounds
-    // before it handles the ready signal and reveals the hidden overlay.
+    // Apply the native bounds before allowing the dashboard-to-overlay swap.
     desktopApi.window.setWindowSize(Math.ceil(bounds.width), Math.ceil(bounds.height))
-    desktopApi.recording.markSurfaceReady(sessionId)
+
+    // A layout effect runs before paint. Give the mounted surface a paint
+    // opportunity before main reveals it and hides the dashboard. The hidden
+    // overlay has backgroundThrottling disabled so these frames can run.
+    let readyFrame: number | undefined
+    const paintFrame = requestAnimationFrame(() => {
+      readyFrame = requestAnimationFrame(() => {
+        desktopApi.recording.markSurfaceReady(sessionId)
+      })
+    })
+    return () => {
+      cancelAnimationFrame(paintFrame)
+      if (readyFrame !== undefined) cancelAnimationFrame(readyFrame)
+    }
   }, [rootRef, sessionId])
 
   return null

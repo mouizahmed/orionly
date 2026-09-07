@@ -38,10 +38,11 @@ type NoteEditorViewProps = {
   userId?: string
 }
 
-type NoteView = 'notes' | 'summary'
+type NoteView = 'notes' | 'context' | 'summary'
 
 const NOTE_VIEW_OPTIONS = [
   { value: 'notes', label: 'Notes' },
+  { value: 'context', label: 'Context' },
   { value: 'summary', label: 'Summary' },
 ] as const
 
@@ -102,6 +103,9 @@ export default function NoteEditorView({
   const bodySaveTimerRef = useRef<number | null>(null)
   const canonicalTitleRef = useRef('')
   const canonicalBodyRef = useRef('')
+  const latestBodyRef = useRef('')
+  const bodyEditRevisionRef = useRef(0)
+  const bodyDirtyRef = useRef(false)
   // Revision the canonical refs were last synchronized at. Query refetches can
   // resolve out of order, so canonical content older than this must not be
   // adopted back into the drafts (it would resurrect just-overwritten text).
@@ -113,6 +117,9 @@ export default function NoteEditorView({
   // Hydrate drafts when selected note detail arrives from context
   useEffect(() => {
     if (!selectedNote) {
+      latestBodyRef.current = ''
+      bodyDirtyRef.current = false
+      bodyEditRevisionRef.current++
       lastLoadedIdRef.current = null
       setHydratedNoteId(null)
       setDraftTitle('')
@@ -125,6 +132,9 @@ export default function NoteEditorView({
     setDraftTitle(selectedNote.title)
     setDraftFolderId(selectedNote.folderId ?? '')
     setDraftNote(selectedNote.noteMarkdown)
+    latestBodyRef.current = selectedNote.noteMarkdown
+    bodyDirtyRef.current = false
+    bodyEditRevisionRef.current++
     canonicalTitleRef.current = selectedNote.title
     canonicalBodyRef.current = selectedNote.noteMarkdown
     canonicalRevisionRef.current = selectedNote.revision
@@ -161,6 +171,9 @@ export default function NoteEditorView({
   useEffect(() => {
     if (!selectedNote || selectedNote.id !== selectedId) return
     if (selectedNote.revision < canonicalRevisionRef.current) return
+    // Returning to the old saved value (including empty) is still an edit:
+    // a save of the intervening text may already be in flight.
+    if (bodyDirtyRef.current) return
     const nextBody = reconcileCanonicalDraft(
       canonicalBodyRef.current,
       draftNote,
@@ -168,6 +181,7 @@ export default function NoteEditorView({
     )
     if (nextBody === null) return
     canonicalBodyRef.current = nextBody
+    latestBodyRef.current = nextBody
     canonicalRevisionRef.current = Math.max(canonicalRevisionRef.current, selectedNote.revision)
     setDraftNote(nextBody)
     updateRecordingNoteDraft(selectedId, nextBody)
@@ -185,6 +199,11 @@ export default function NoteEditorView({
         || snapshot.session.noteId !== selectedId
       ))
     ) return
+    if (latestBodyRef.current !== recordingNoteDraft.value) {
+      latestBodyRef.current = recordingNoteDraft.value
+      bodyDirtyRef.current = true
+      bodyEditRevisionRef.current++
+    }
     setDraftNote((current) => current === recordingNoteDraft.value ? current : recordingNoteDraft.value)
     if (canonicalBodyRef.current === recordingNoteDraft.value) {
       acknowledgeNoteDraft(recordingNoteDraft)
@@ -285,15 +304,19 @@ export default function NoteEditorView({
   useEffect(() => {
     if (!selectedId) return
     if (lastLoadedIdRef.current !== selectedId) return
-    if (draftNote === canonicalBodyRef.current) return
+    if (!bodyDirtyRef.current && draftNote === canonicalBodyRef.current) return
     if (bodySaveTimerRef.current) window.clearTimeout(bodySaveTimerRef.current)
     const noteID = selectedId
+    const editRevision = bodyEditRevisionRef.current
     bodySaveTimerRef.current = window.setTimeout(() => {
       void updateNoteAsync({ noteID, patch: { noteMarkdown: draftNote } })
         .then((note) => {
-          if (!note) return
+          if (!note || lastLoadedIdRef.current !== noteID) return
           canonicalBodyRef.current = note.noteMarkdown
           canonicalRevisionRef.current = Math.max(canonicalRevisionRef.current, note.revision)
+          if (bodyEditRevisionRef.current === editRevision && latestBodyRef.current === note.noteMarkdown) {
+            bodyDirtyRef.current = false
+          }
           const pendingDraft = recordingNoteDraftRef.current
           if (pendingDraft?.noteId === noteID && pendingDraft.value === note.noteMarkdown) {
             acknowledgeNoteDraft(pendingDraft)
@@ -325,6 +348,9 @@ export default function NoteEditorView({
   }, [moveNoteAsync, selectedId])
 
   const handleNoteChange = useCallback((value: string) => {
+    latestBodyRef.current = value
+    bodyDirtyRef.current = true
+    bodyEditRevisionRef.current++
     setDraftNote(value)
     if (selectedId) updateRecordingNoteDraft(selectedId, value)
   }, [selectedId, updateRecordingNoteDraft])
@@ -350,13 +376,17 @@ export default function NoteEditorView({
     <ViewSwitch
       options={NOTE_VIEW_OPTIONS}
       ariaLabel="Note view"
+      className="rounded-lg [&_[data-slot=tabs-trigger]]:rounded-md"
     />
   )
 
   return (
     <Tabs
       value={activeView}
-      onValueChange={(value) => setActiveView(value === 'summary' ? 'summary' : 'notes')}
+      onValueChange={(value) => {
+        if (value === 'context' || value === 'summary') setActiveView(value)
+        else setActiveView('notes')
+      }}
       className="h-full w-full min-h-0 min-w-0 max-w-full gap-0 [contain:inline-size]"
     >
       <div className="relative flex h-full min-h-0 min-w-0">
@@ -364,18 +394,15 @@ export default function NoteEditorView({
       {/* ── Main panel ── */}
       <div className="relative flex min-w-0 flex-1 flex-col rounded-lg border border-neutral-300/70 bg-white/82 shadow-[inset_0_1px_0_rgba(255,255,255,0.68),0_18px_46px_-34px_rgba(15,23,42,0.5)] backdrop-blur-md dark:border-white/10 dark:bg-[#171417]/80 dark:shadow-none">
 
+        <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 px-3 pt-2">
         {/* Title row */}
-        <div className="flex min-w-0 items-center gap-2 border-b border-neutral-200 px-3 py-2 dark:border-white/10">
+        <div className="col-start-1 row-start-1 flex min-w-0 items-center gap-2">
           {noteIsLoading ? (
             <div className="flex h-8 w-full items-center gap-2" aria-hidden="true">
               <div className="h-3 w-28 animate-pulse rounded bg-neutral-200/80 dark:bg-white/10" />
-              <div className="ml-auto h-8 w-24 animate-pulse rounded-full bg-neutral-200/70 dark:bg-white/8" />
-              <div className="h-8 w-32 animate-pulse rounded-full bg-neutral-200/70 dark:bg-white/8" />
-              <div className="h-8 w-24 animate-pulse rounded-full bg-neutral-200/70 dark:bg-white/8" />
             </div>
           ) : (
-            <>
-              <input
+            <input
             value={draftTitle}
             onChange={(e) => setDraftTitle(e.target.value)}
             onKeyDown={(e) => {
@@ -388,7 +415,15 @@ export default function NoteEditorView({
             disabled={!selectedId}
             className="h-8 min-w-0 flex-1 truncate bg-transparent text-xs font-medium text-neutral-900 outline-none placeholder:text-neutral-400 dark:text-neutral-50 dark:placeholder:text-neutral-500"
           />
-          {noteViewSwitch}
+          )}
+        </div>
+
+        {!noteIsLoading ? (
+          <>
+          <div className="col-span-2 row-start-2 mt-2 flex min-w-0 items-center">
+            {noteViewSwitch}
+          </div>
+          <div className="col-start-2 row-start-1 flex min-w-0 items-center gap-2">
           <div ref={folderPickerRef} className="relative" style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}>
             <Button
               type="button"
@@ -499,7 +534,7 @@ export default function NoteEditorView({
             )}
           </div>
 
-          {/* Attendees and note sharing stay at the end of the header actions. */}
+          {/* Attendees stay with the meeting controls. */}
           {selectedNote && (
             <NoteAttendeesDropdown note={selectedNote} />
           )}
@@ -515,9 +550,9 @@ export default function NoteEditorView({
           >
             <Share2 className="h-3.5 w-3.5" />
           </Button>
-
-            </>
-          )}
+          </div>
+          </>
+        ) : null}
         </div>
 
         {/* Editor */}
@@ -536,6 +571,17 @@ export default function NoteEditorView({
               noteId={selectedId}
               bottomOverlayInset={88}
             />
+              </TabsContent>
+
+              <TabsContent value="context" className="h-full min-h-0">
+                <div className="flex h-full min-h-0 items-center justify-center px-6 text-center">
+                  <div className="max-w-xs">
+                    <p className="text-xs font-medium text-neutral-700 dark:text-neutral-300">No context yet</p>
+                    <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                      Files and links added to this meeting will appear here.
+                    </p>
+                  </div>
+                </div>
               </TabsContent>
 
               <TabsContent value="summary" className="h-full min-h-0">

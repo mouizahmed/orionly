@@ -53,15 +53,13 @@ export default function RecordingOverlayHeader({
 
   return (
     <header
-      className={cn(
-        'grid shrink-0 items-center px-2',
-        collapsed
-          ? 'h-12 grid-cols-[1fr_auto_auto_auto] gap-1.5'
-          : 'h-12 grid-cols-[1fr_auto_1fr] gap-1.5',
-      )}
+      // The 48px collapsed surface includes two 1px borders. Keep its header
+      // at that inner height in both states so controls never follow the
+      // animated body height during collapse.
+      className="grid h-[46px] shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-1.5 px-1.5"
       style={{ WebkitAppRegion: 'drag' } as CSSProperties}
     >
-      <div className="flex h-8 min-w-0 flex-col justify-center px-2">
+      <div className="flex h-8 min-w-0 flex-col justify-center px-1">
         <div className="font-mono text-[11px] font-medium tabular-nums text-neutral-700 dark:text-neutral-200">
           {formatRecordingElapsedTime(elapsedMs)}
         </div>

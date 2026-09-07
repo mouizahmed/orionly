@@ -1,4 +1,4 @@
-import { BrowserWindow, nativeTheme, shell, type WebContents } from 'electron'
+import { app, BrowserWindow, nativeTheme, shell, type WebContents } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setAuthCallbackWindow } from './protocol-handler'
@@ -404,8 +404,15 @@ export function hideOverlayWindow() {
   win.hide()
 }
 
+function restoreMacOSDock() {
+  if (process.platform !== 'darwin') return
+  app.setActivationPolicy('regular')
+  void app.dock?.show()
+}
+
 export function revealDashboardWindow(noteId?: string) {
   hideOverlayWindow()
+  restoreMacOSDock()
 
   if (dashboardWin && !dashboardWin.isDestroyed()) {
     if (noteId) dashboardWin.webContents.send('dashboard:select-note', { noteId })

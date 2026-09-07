@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -200,6 +201,8 @@ function MarkdownEditorInner(
   // events emitted during those writes are re-serializations, not user edits;
   // reporting them upward creates save churn and cross-window echo loops.
   const applyingExternalMarkdownRef = useRef(false)
+  const pendingLocalMarkdownRef = useRef<string[]>([])
+  const syncedNoteIdRef = useRef(noteId)
 
   const applyMarkdownToEditor = useCallback((value: string) => {
     const editor = editorRef.current
@@ -259,6 +262,7 @@ function MarkdownEditorInner(
           const imageMarkdown = `![${file.name}](${url})`
           const current = editorRef.current?.getMarkdown() ?? ''
           const updated = current ? `${current}\n\n${imageMarkdown}` : imageMarkdown
+          pendingLocalMarkdownRef.current.push(updated)
           onChangeRef.current(updated)
           applyMarkdownToEditor(updated)
         } catch (e) {
@@ -359,18 +363,31 @@ function MarkdownEditorInner(
     window.editorContextMenu?.run(command)
   }, [])
 
-  // Sync external markdown changes (e.g. note switch) into the editor
-  useEffect(() => {
+  // Parent props also echo our own edits. An older echo must not overwrite
+  // input Lexical has already accepted while React was catching up.
+  useLayoutEffect(() => {
+    if (syncedNoteIdRef.current !== noteId) {
+      syncedNoteIdRef.current = noteId
+      pendingLocalMarkdownRef.current = []
+    } else {
+      const echoIndex = pendingLocalMarkdownRef.current.lastIndexOf(externalMarkdown)
+      if (echoIndex !== -1) {
+        pendingLocalMarkdownRef.current.splice(0, echoIndex + 1)
+        return
+      }
+    }
+    pendingLocalMarkdownRef.current = []
     const editor = editorRef.current
     if (!editor || editor.getMarkdown() === externalMarkdown) return
     applyMarkdownToEditor(externalMarkdown)
-  }, [applyMarkdownToEditor, externalMarkdown])
+  }, [applyMarkdownToEditor, externalMarkdown, noteId])
 
   const handleChange = (value: string, initialMarkdownNormalize: boolean) => {
     // MDXEditor identifies its own mount-time normalization. A generic
     // "ignore first change" flag can swallow the user's first real keystroke
     // whenever no normalization event is emitted.
     if (initialMarkdownNormalize || applyingExternalMarkdownRef.current) return
+    pendingLocalMarkdownRef.current.push(value)
     onChange(value)
   }
 
